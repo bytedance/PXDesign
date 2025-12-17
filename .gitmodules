@@ -1,0 +1,4 @@
+[submodule "eval_design"]
+	path = eval_design
+	url = https://github.com/bytedance/PXDesignBench.git
+	branch = master

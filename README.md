@@ -207,12 +207,25 @@ To customize the input YAML file, we highly recommend following the [Preparing C
 ⚠️ *First Run Notice:* The initial run involves model downloading and kernel compilation. Please expect a one-time delay; subsequent runs will be faster.
 
 ```bash
-pxdesign pipeline --preset extended -i <YAML_FILE> -o <out_dir> --N_sample <num_samples> \
-  --dtype bf16 --use_fast_ln True --use_deepspeed_evo_attention True
-
-# Example:
-pxdesign pipeline --preset extended -i ./examples/PDL1_quick_start.yaml -o ./examples/test_run --N_sample 10 \
-  --dtype bf16 --use_fast_ln True --use_deepspeed_evo_attention True
+pxdesign pipeline \
+  --preset extended \
+  -i <YAML_FILE> \
+  -o <OUT_DIR> \
+  --N_sample <NUM_SAMPLES> \
+  --dtype bf16 \
+  --use_fast_ln True \
+  --use_deepspeed_evo_attention True
+```
+**Example:**
+```
+pxdesign pipeline \
+  --preset extended \
+  -i ./examples/PDL1_quick_start.yaml \
+  -o ./examples/test_run \
+  --N_sample 10 \
+  --dtype bf16 \
+  --use_fast_ln True \
+  --use_deepspeed_evo_attention True
 ```
 > For runs on modern GPUs (e.g., A100/H100), we recommend the BF16 precision and kernel optimizations by setting `--dtype bf16 --use_fast_ln True --use_deepspeed_evo_attention True`. <br>
 > If you are running on older GPUs (e.g., V100), you may set `--dtype fp32 --use_deepspeed_evo_attention False`.
@@ -403,7 +416,10 @@ Even if you crop the target structure for design purposes, the MSA must always b
 > #### ⚡ Quick Start: Recommended Configuration
 > For most production runs on modern GPUs (e.g., A100/H100), we recommend the **Full Pipeline Extended Mode** with BF16 precision and kernel optimizations.
 > ```bash
-> pxdesign pipeline --preset extended -i <YAML_FILE> -o <out_dir> --N_sample <N_samples> \
+> pxdesign pipeline --preset extended \
+>  -i <YAML_FILE> \
+>  -o <out_dir> \
+>  --N_sample <N_samples> \
 >  --dtype bf16 \
 >  --use_fast_ln True \
 >  --use_deepspeed_evo_attention True

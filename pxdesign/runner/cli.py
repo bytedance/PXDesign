@@ -496,15 +496,18 @@ def prepare_msa(yaml_file: str, output_yaml: str | None) -> None:
         keep_chains = list(cfg["target"]["chains"].keys())
 
         if target_file.endswith(".pdb"):
-            with tempfile.TemporaryDirectory(prefix="pxdesign_pdb2cif_") as tmpdir:
-                cif_file = str(Path(tmpdir) / "input.cif")
-                atom_array = pdb_to_cif(target_file, cif_file)
-                m = build_chain_mapping(
-                    atom_array.auth_asym_id,
-                    atom_array.chain_id,
-                    keep_chains=keep_chains,
-                )
-                chain_mapping = {v: k for k, v in m.items()}
+            fd, cif_file = tempfile.mkstemp(
+                prefix="pxdesign_pdb2cif_",
+                suffix=".cif",
+            )
+            os.close(fd)
+            atom_array = pdb_to_cif(target_file, cif_file)
+            m = build_chain_mapping(
+                atom_array.auth_asym_id,
+                atom_array.chain_id,
+                keep_chains=keep_chains,
+            )
+            chain_mapping = {v: k for k, v in m.items()}
             return cif_file, chain_mapping
 
         return target_file, None
@@ -587,6 +590,12 @@ def prepare_msa(yaml_file: str, output_yaml: str | None) -> None:
         avail_chains=avail_chains,
         chain_mapping=chain_mapping,
     )
+
+    if cfg["target"]["file"].endswith(".pdb"):
+        try:
+            os.remove(cif_file)
+        except OSError:
+            pass
 
     # populate precomputed MSA using cache
     input_json = populate_msa_with_cache([input_json])[0]

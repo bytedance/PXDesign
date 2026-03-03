@@ -271,7 +271,6 @@ class RelativePositionEncoding(nn.Module):
         ) * b_same_chain + (1 - b_same_chain) * (
             2 * self.r_max + 1
         )  # [..., N_token, N_token]
-        a_rel_pos = F.one_hot(d_residue, 2 * (self.r_max + 1))
         d_token = torch.clip(
             input=input_feature_dict["token_index"][..., :, None]
             - input_feature_dict["token_index"][..., None, :]
@@ -281,7 +280,6 @@ class RelativePositionEncoding(nn.Module):
         ) * b_same_chain * b_same_residue + (1 - b_same_chain * b_same_residue) * (
             2 * self.r_max + 1
         )  # [..., N_token, N_token]
-        a_rel_token = F.one_hot(d_token, 2 * (self.r_max + 1))
         d_chain = torch.clip(
             input=input_feature_dict["sym_id"][..., :, None]
             - input_feature_dict["sym_id"][..., None, :]
@@ -291,62 +289,27 @@ class RelativePositionEncoding(nn.Module):
         ) * b_same_entity + (1 - b_same_entity) * (
             2 * self.s_max + 1
         )  # [..., N_token, N_token]
-        a_rel_chain = F.one_hot(d_chain, 2 * (self.s_max + 1))
 
-        if self.training:
-            p = self.linear_no_bias(
-                torch.cat(
-                    [a_rel_pos, a_rel_token, b_same_entity[..., None], a_rel_chain],
-                    dim=-1,
-                ).float()
-            )  # [..., N_token, N_token, 2 * (self.r_max + 1)+ 2 * (self.r_max + 1)+ 1 + 2 * (self.s_max + 1)] -> [..., N_token, N_token, c_z]
-            return p
-        else:
-            del d_chain, d_token, d_residue, b_same_chain, b_same_residue
-            origin_shape = a_rel_pos.shape[:-1]
-            Ntoken = a_rel_pos.shape[-2]
-            a_rel_pos = a_rel_pos.reshape(-1, a_rel_pos.shape[-1])
-            chunk_num = 1 if Ntoken < 3200 else 8
-            a_rel_pos_chunks = torch.chunk(
-                a_rel_pos.reshape(-1, a_rel_pos.shape[-1]), chunk_num, dim=-2
-            )
-            a_rel_token_chunks = torch.chunk(
-                a_rel_token.reshape(-1, a_rel_token.shape[-1]), chunk_num, dim=-2
-            )
-            b_same_entity_chunks = torch.chunk(
-                b_same_entity.reshape(-1, 1), chunk_num, dim=-2
-            )
-            a_rel_chain_chunks = torch.chunk(
-                a_rel_chain.reshape(-1, a_rel_chain.shape[-1]), chunk_num, dim=-2
-            )
-            start = 0
-            p = None
-            for i in range(len(a_rel_pos_chunks)):
-                data = torch.cat(
-                    [
-                        a_rel_pos_chunks[i],
-                        a_rel_token_chunks[i],
-                        b_same_entity_chunks[i],
-                        a_rel_chain_chunks[i],
-                    ],
-                    dim=-1,
-                ).float()
-                result = self.linear_no_bias(data)
-                del data
-                if p is None:
-                    p = torch.empty(
-                        (a_rel_pos.shape[-2], self.c_z),
-                        device=a_rel_pos.device,
-                        dtype=result.dtype,
-                    )
-                p[start : start + result.shape[0]] = result
-                start += result.shape[0]
-                del result
-            del a_rel_pos, a_rel_token, b_same_entity, a_rel_chain
-            p = p.reshape(*origin_shape, -1)
-            if p.shape[-2] > 2000:
-                torch.cuda.empty_cache()
-            return p
+        # Use embedding lookup instead of one_hot + linear.
+        # Mathematical equivalence: one_hot(idx, K) @ W_sub = W_sub.T[:, idx].T = W.T[idx]
+        # This avoids materializing huge one-hot tensors (N_token^2 x 66 each).
+        # For 3000 tokens: saves ~5GB of peak intermediate memory.
+        W = self.linear_no_bias.weight.t().float()  # [input_dim, c_z]
+        n_pos = 2 * (self.r_max + 1)
+        n_chain = 2 * (self.s_max + 1)
+
+        W_pos = W[:n_pos]                    # [66, c_z]
+        W_token = W[n_pos:2 * n_pos]         # [66, c_z]
+        W_entity = W[2 * n_pos]              # [c_z]
+        W_chain = W[2 * n_pos + 1:]          # [6, c_z]
+
+        # Direct indexing replaces one_hot + matmul
+        p = W_pos[d_residue]                                    # [..., N, N, c_z]
+        p = p + W_token[d_token]                                # [..., N, N, c_z]
+        p = p + b_same_entity.unsqueeze(-1).float() * W_entity  # [..., N, N, c_z]
+        p = p + W_chain[d_chain]                                # [..., N, N, c_z]
+
+        return p
 
 
 class FourierEmbedding(nn.Module):

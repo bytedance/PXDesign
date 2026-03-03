@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
 import json
 import os
 from pathlib import Path
@@ -195,12 +194,12 @@ def save_structure_cif(
         entity_poly_type (dict[str, str]): The entity poly type information.
         pdb_id (str): The PDB ID for the entry.
     """
-    pred_atom_array = copy.deepcopy(atom_array)
-    pred_pose = pred_coordinate.cpu().numpy()
-    pred_atom_array.coord = pred_pose
+    original_coord = atom_array.coord
+    atom_array.coord = pred_coordinate.cpu().numpy()
     save_atoms_to_cif(
         output_fpath,
-        pred_atom_array,
+        atom_array,
         entity_poly_type,
         pdb_id,
     )
+    atom_array.coord = original_coord

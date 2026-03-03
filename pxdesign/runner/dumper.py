@@ -136,26 +136,24 @@ class DataDumper:
         entity_poly_type=None,
     ):
         N_sample = pred_coordinates.shape[0]
+        # Set annotations once before the loop
+        atom_array.set_annotation(
+            "b_factor", np.round(np.zeros(len(atom_array)).astype(float), 2)
+        )
+        if "occupancy" not in atom_array._annot:
+            atom_array.set_annotation(
+                "occupancy", np.round(np.ones(len(atom_array)), 2)
+            )
         for sample_idx in range(N_sample):
             output_fpath = os.path.join(
                 prediction_save_dir, f"{sample_name}_sample_{sample_idx}.cif"
             )
-            # fake b_factor
-            atom_array.set_annotation(
-                "b_factor", np.round(np.zeros(len(atom_array)).astype(float), 2)
-            )
-            if "occupancy" not in atom_array._annot:
-                # fake occupancy
-                atom_array.set_annotation(
-                    "occupancy", np.round(np.ones(len(atom_array)), 2)
-                )
             save_structure_cif(
                 atom_array,
                 pred_coordinates[sample_idx],
                 output_fpath,
                 entity_poly_type,
                 sample_name,
-                # save_wounresol=False,
             )
 
     def _save_confidence(

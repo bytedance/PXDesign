@@ -461,50 +461,64 @@ class Featurizer(object):
         Returns:
             Dict[str, torch.Tensor]: A dict of bond features.
         """
-        bond_features = {}
         num_tokens = len(self.cropped_token_array)
-        adj_matrix = self.cropped_atom_array.bonds.adjacency_matrix().astype(int)
+        num_atoms = len(self.cropped_atom_array)
 
+        # Build atom-to-token index array
+        atom_to_token = np.full(num_atoms, -1, dtype=np.int64)
+        for idx, token in enumerate(self.cropped_token_array.tokens):
+            for atom_idx in token.atom_indices:
+                atom_to_token[atom_idx] = idx
+
+        # Pre-compute per-token properties using the first atom of each token
+        first_atoms = np.array([
+            self.cropped_token_array[i].atom_indices[0] for i in range(num_tokens)
+        ])
+        token_mol_type = self.cropped_atom_array.mol_type[first_atoms]
+        token_res_name = self.cropped_atom_array.res_name[first_atoms]
+        token_ref_space_uid = self.cropped_atom_array.ref_space_uid[first_atoms]
+
+        # Boolean masks for token properties
+        is_design = np.array([rn in DESIGN_RESIDUES for rn in token_res_name])
+        is_polymer = np.isin(token_mol_type, ["protein", "dna", "rna"])
+        is_ligand = token_mol_type == "ligand"
+        is_std = np.array([rn in STD_RESIDUES for rn in token_res_name])
+        is_unstd = ~is_std & ~is_ligand
+
+        # Get bonded atom pairs from the adjacency matrix
+        adj_matrix = self.cropped_atom_array.bonds.adjacency_matrix()
+        bonded_i, bonded_j = np.nonzero(adj_matrix)
+
+        # Map bonded atoms to their token indices
+        token_i = atom_to_token[bonded_i]
+        token_j = atom_to_token[bonded_j]
+
+        # Filter: only inter-token bonds (different tokens)
+        inter_token = token_i != token_j
+        token_i = token_i[inter_token]
+        token_j = token_j[inter_token]
+
+        # Filter: skip design tokens
+        valid = ~is_design[token_i] & ~is_design[token_j]
+        token_i = token_i[valid]
+        token_j = token_j[valid]
+
+        # Filter: polymer-polymer exclusion rule
+        # Exclude polymer-polymer pairs UNLESS same residue AND both non-standard
+        both_polymer = is_polymer[token_i] & is_polymer[token_j]
+        same_res = token_ref_space_uid[token_i] == token_ref_space_uid[token_j]
+        both_unstd = is_unstd[token_i] & is_unstd[token_j]
+        polymer_allowed = same_res & both_unstd
+        exclude = both_polymer & ~polymer_allowed
+        token_i = token_i[~exclude]
+        token_j = token_j[~exclude]
+
+        # Build the token adjacency matrix
         token_adj_matrix = np.zeros((num_tokens, num_tokens), dtype=int)
-        atom_bond_mask = adj_matrix > 0
+        if len(token_i) > 0:
+            token_adj_matrix[token_i, token_j] = 1
 
-        for i in range(num_tokens):
-            atoms_i = self.cropped_token_array[i].atom_indices
-            token_i_mol_type = self.cropped_atom_array.mol_type[atoms_i[0]]
-            token_i_res_name = self.cropped_atom_array.res_name[atoms_i[0]]
-            if token_i_res_name in DESIGN_RESIDUES:
-                # not assign token bonds for design tokens
-                continue
-            token_i_ref_space_uid = self.cropped_atom_array.ref_space_uid[atoms_i[0]]
-            unstd_res_token_i = (
-                token_i_res_name not in STD_RESIDUES and token_i_mol_type != "ligand"
-            )
-            is_polymer_i = token_i_mol_type in ["protein", "dna", "rna"]
-
-            for j in range(i + 1, num_tokens):
-                atoms_j = self.cropped_token_array[j].atom_indices
-                token_j_mol_type = self.cropped_atom_array.mol_type[atoms_j[0]]
-                token_j_res_name = self.cropped_atom_array.res_name[atoms_j[0]]
-                token_j_ref_space_uid = self.cropped_atom_array.ref_space_uid[
-                    atoms_j[0]
-                ]
-                unstd_res_token_j = (
-                    token_j_res_name not in STD_RESIDUES
-                    and token_j_mol_type != "ligand"
-                )
-                is_polymer_j = token_j_mol_type in ["protein", "dna", "rna"]
-
-                # the polymer-polymer (std-std, std-unstd, and inter-unstd) bond will not be included in token_bonds.
-                if is_polymer_i and is_polymer_j:
-                    is_same_res = token_i_ref_space_uid == token_j_ref_space_uid
-                    unstd_res_bonds = unstd_res_token_i and unstd_res_token_j
-                    if not (is_same_res and unstd_res_bonds):
-                        continue
-
-                sub_matrix = atom_bond_mask[np.ix_(atoms_i, atoms_j)]
-                if np.any(sub_matrix):
-                    token_adj_matrix[i, j] = 1
-                    token_adj_matrix[j, i] = 1
+        bond_features = {}
         bond_features["token_bonds"] = torch.Tensor(token_adj_matrix)
         return bond_features
 
